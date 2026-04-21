@@ -4,17 +4,18 @@ import os
 # basic connection function for our app
 def connect_db():
     # using env vars if available, otherwise fallback values
-    db_name = os.getenv("DB_NAME") or "workout_tracker"
-    user = os.getenv("DB_USER") or "postgres"
-    password = os.getenv("DB_PASS") or "postgres"
-    host = os.getenv("DB_HOST") or "localhost"
+    # db_name = os.getenv("DB_NAME") or "workout_tracker"
+    # user = os.getenv("DB_USER") or "postgres"
+    # password = os.getenv("DB_PASS") or "postgres"
+    # host = os.getenv("DB_HOST") or "localhost"
 
-    conn = psycopg2.connect(
-        dbname=db_name,
-        user=user,
-        password=password,
-        host=host
-    )
+    # conn = psycopg2.connect(
+    #     dbname=db_name,
+    #     user=user,
+    #     password=password,
+    #     host=host
+    # )
+    conn = psycopg2.connect(os.getenv("DATABASE_URL"))
     return conn
 
 
