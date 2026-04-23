@@ -1,5 +1,6 @@
 import psycopg2
 import os
+from flask import g
 
 # basic connection function for our app
 def connect_db():
@@ -31,6 +32,15 @@ def check_db():
     except Exception as err:
         print("error connecting to db:", err)
 
+def get_db():
+    if 'db' not in g:
+        g.db = connect_db()
+    return g.db
+
+def close_db(_e=None):
+    conn = g.pop('db', None)
+    if conn is not None:
+        conn.close()
 
 if __name__ == "__main__":
     check_db()
