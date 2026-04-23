@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Workout Tracker</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="header">
+        <div>
+          <h1 class="title">Workout Tracker</h1>
+        </div>
+      </header>
+
+      <section class="card">
+        <div class="card-header">
+          <h2 class="card-title">Workouts</h2>
+        </div>
+
+        <div class="table-wrap">
+          <table class="table" aria-label="Workout table">
+            <thead>
+              <tr>
+                <th scope="col">Date</th>
+                <th scope="col">Exercise</th>
+                <th scope="col" class="num">Sets</th>
+                <th scope="col" class="num">Reps</th>
+                <th scope="col" class="num">Weight</th>
+                <th scope="col">Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% if workouts and workouts|length > 0 %}
+                {% for w in workouts %}
+                  <tr>
+                    <td class="mono">{{ w.date }}</td>
+                    <td>{{ w.exercise }}</td>
+                    <td class="num">{{ w.sets }}</td>
+                    <td class="num">{{ w.reps }}</td>
+                    <td class="num">{{ w.weight }}</td>
+                    <td class="muted">{{ w.notes if w.notes else "—" }}</td>
+                  </tr>
+                {% endfor %}
+              {% else %}
+                <tr>
+                  <td colspan="6" class="empty">
+                    No workouts yet. This table is ready to be connected to the database when you are.
+                  </td>
+                </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
+
