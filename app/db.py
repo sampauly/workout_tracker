@@ -1,6 +1,11 @@
 import psycopg2
 import os
 from flask import g
+from dotenv import load_dotenv, find_dotenv
+
+# Ensure DATABASE_URL is available even when running this file directly
+# (e.g., `python .\app\db.py` or from within the `app\` directory).
+load_dotenv(find_dotenv())
 
 # basic connection function for our app
 def connect_db():
