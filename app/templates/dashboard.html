@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Workout Tracker{% endblock %}
+
+{% block content %}
+<h1 class="mb-1">Hey, {{ session['username'] }}!</h1>
+<p class="text-muted mb-4">Ready to get to work?</p>
+
+<div class="row g-3 mb-4">
+    <div class="col-sm-4">
+        <div class="card text-center h-100">
+            <div class="card-body">
+                <h2 class="display-4 fw-bold">{{ workout_count }}</h2>
+                <p class="text-muted mb-0">Total Workouts Logged</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="d-flex gap-2 flex-wrap">
+    <a href="/workouts/new" class="btn btn-primary">+ Log a Workout</a>
+    <a href="/workouts" class="btn btn-outline-secondary">View History</a>
+    <a href="/exercises" class="btn btn-outline-secondary">Browse Exercises</a>
+    <a href="/recommend" class="btn btn-outline-secondary">Get a Recommendation</a>
+    <a href="/stats" class="btn btn-outline-secondary">Stats</a>
+</div>
+{% endblock %}

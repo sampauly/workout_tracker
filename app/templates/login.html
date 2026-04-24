@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Login — Workout Tracker{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-5">
+    <div class="col-md-5">
+        <div class="card shadow-sm">
+            <div class="card-body p-4">
+                <h2 class="card-title mb-4">Select a User</h2>
+
+                {% if users %}
+                <form method="POST" action="/login">
+                    <div class="mb-3">
+                        <label for="user_id" class="form-label">Who are you?</label>
+                        <select name="user_id" id="user_id" class="form-select form-select-lg" required>
+                            <option value="" disabled selected>Pick your name...</option>
+                            {% for user_id, username, email in users %}
+                            <option value="{{ user_id }}">{{ username }} ({{ email }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-lg w-100">Let's Go</button>
+                </form>
+                {% else %}
+                <p class="text-muted">No users found in the database. Add one first.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
