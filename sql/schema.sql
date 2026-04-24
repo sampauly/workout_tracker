@@ -8,7 +8,8 @@ CREATE TABLE workout (
     workout_id  SERIAL PRIMARY KEY,
     user_id     INTEGER NOT NULL REFERENCES "user"(user_id),
     name        VARCHAR(100) NOT NULL,
-    description TEXT
+    description TEXT,
+    logged_at   TIMESTAMP
 );
 
 CREATE TABLE exercise (
@@ -19,7 +20,6 @@ CREATE TABLE exercise (
 );
 
 CREATE TABLE workout_exercise (
-    workout_exercise_id SERIAL PRIMARY KEY,
     workout_id          INTEGER NOT NULL REFERENCES workout(workout_id),
     exercise_id         INTEGER NOT NULL REFERENCES exercise(exercise_id),
     sets                INTEGER,
@@ -27,4 +27,5 @@ CREATE TABLE workout_exercise (
     weight              FLOAT,
     weight_metric       VARCHAR(10),
     order_index         INTEGER
+    PRIMARY KEY (workout_id, exercise_id)
 );
