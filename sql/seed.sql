@@ -1,5 +1,5 @@
 -- demo user
-INSERT INTO user (username, email)
+INSERT INTO "user" (username, email)
 VALUES ('test_user', 'tester@workout_tracker.com');
 
 
