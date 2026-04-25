@@ -183,6 +183,46 @@ def new_workout():
             errors['exercises'] = 'Fix exercise row errors.'
 
         if not errors:
-            flash('Form received.', 'success')
+            conn = get_db()
+            cur = conn.cursor()
+            try:
+                cur.execute(
+                    """
+                    INSERT INTO workout (user_id, name, description)
+                    VALUES (%s, %s, %s)
+                    RETURNING workout_id
+                    """,
+                    (session.get('user_id'), name, (description or None)),
+                )
+                workout_id = cur.fetchone()[0]
+
+                for ex in rows:
+                    cur.execute(
+                        """
+                        INSERT INTO workout_exercise
+                          (workout_id, exercise_id, sets, reps, weight, weight_metric, order_index)
+                        VALUES
+                          (%s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            workout_id,
+                            int(ex['exercise_id']),
+                            int(ex['sets']),
+                            int(ex['reps']),
+                            (float(ex['weight']) if ex['weight'] else None),
+                            (ex['weight_metric'] or None),
+                            int(ex['order_index']) if ex['order_index'] else None,
+                        ),
+                    )
+
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                cur.close()
+
+            flash('Workout saved.', 'success')
+            return redirect(url_for('dashboard'))
 
     return render_template('new_workout.html', submitted=submitted, errors=errors, row_errors=row_errors)

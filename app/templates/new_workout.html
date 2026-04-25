@@ -182,11 +182,5 @@
   })();
 </script>
 
-{% if submitted and not errors %}
-<script>
-  // Console log verification of the submitted payload
-  console.log("Workout form payload", {{ submitted|tojson }});
-</script>
-{% endif %}
 {% endblock %}
 
