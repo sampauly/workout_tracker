@@ -23,6 +23,7 @@
             <th scope="col">Workout</th>
             <th scope="col" class="text-end">Exercises</th>
             <th scope="col">Notes</th>
+            <th scope="col" class="text-end">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -36,7 +37,7 @@
                     —
                   {% endif %}
                 </td>
-                <td class="fw-semibold">{{ w.name }}</td>
+                <td class="fw-semibold text-body">{{ w.name }}</td>
                 <td class="text-end">{{ w.exercise_count }}</td>
                 <td class="text-muted">
                   {% if w.description %}
@@ -45,11 +46,14 @@
                     —
                   {% endif %}
                 </td>
+                <td class="text-end text-nowrap">
+                  <a class="btn btn-sm btn-outline-primary" href="/workouts/{{ w.workout_id }}/edit">Edit</a>
+                </td>
               </tr>
             {% endfor %}
           {% else %}
             <tr>
-              <td colspan="4" class="p-4 text-center text-muted">
+              <td colspan="5" class="p-4 text-center text-muted">
                 No workouts yet. <a href="/workouts/new">Log your first workout</a>.
               </td>
             </tr>

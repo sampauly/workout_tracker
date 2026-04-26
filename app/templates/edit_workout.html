@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% block title %}Edit Workout — Workout Tracker{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+  <div>
+    <h1 class="mb-1">Edit Workout</h1>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    <a class="btn btn-outline-secondary" href="/workouts">Back</a>
+    <form method="POST" action="/workouts/{{ workout_id }}/delete" onsubmit="return confirm('Delete this workout? This cannot be undone.');">
+      <button type="submit" class="btn btn-outline-danger">Delete</button>
+    </form>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-12">
+    <div class="card shadow-sm">
+      <div class="card-body p-4">
+        <form method="POST" action="/workouts/{{ workout_id }}/edit" novalidate>
+          <div class="mb-3">
+            <label for="name" class="form-label">Workout name</label>
+            <input
+              type="text"
+              class="form-control form-control-lg {% if errors.get('name') %}is-invalid{% endif %}"
+              id="name"
+              name="name"
+              maxlength="100"
+              placeholder="e.g. Push Day"
+              value="{{ (submitted.name if submitted else request.form.get('name', '')) }}"
+              required
+            />
+            {% if errors.get('name') %}
+              <div class="invalid-feedback">{{ errors.get('name') }}</div>
+            {% else %}
+              <div class="form-text">Required. Max 100 characters.</div>
+            {% endif %}
+          </div>
+
+          <div class="mb-3">
+            <label for="description" class="form-label">Description (optional)</label>
+            <textarea
+              class="form-control {% if errors.get('description') %}is-invalid{% endif %}"
+              id="description"
+              name="description"
+              maxlength="2000"
+              rows="5"
+              placeholder="Notes, goals, or what you trained..."
+            >{{ (submitted.description if submitted else request.form.get('description', '')) }}</textarea>
+            {% if errors.get('description') %}
+              <div class="invalid-feedback">{{ errors.get('description') }}</div>
+            {% else %}
+              <div class="form-text">Max 2000 characters.</div>
+            {% endif %}
+          </div>
+
+          <div class="mb-3">
+            <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
+              <label class="form-label mb-0">Exercises</label>
+              <button type="button" class="btn btn-outline-secondary btn-sm" id="add-exercise">+ Add exercise</button>
+            </div>
+            {% if errors.get('exercises') %}
+              <div class="alert alert-danger py-2 mb-2">{{ errors.get('exercises') }}</div>
+            {% else %}
+              <div class="form-text mb-2">Enter an <span class="font-monospace">exercise_id</span>, plus sets/reps/weight as needed.</div>
+            {% endif %}
+
+            <div id="exercise-rows" class="d-flex flex-column gap-2">
+              {% set rows = (submitted.exercises if submitted and submitted.exercises else [{'exercise_id':'','sets':'','reps':'','weight':'','weight_metric':'','order_index':'1'}]) %}
+              {% for row in rows %}
+                {% set re = (row_errors[loop.index0] if row_errors and (loop.index0 < row_errors|length) else {}) %}
+                <div class="border rounded p-3">
+                  <div class="row g-2 align-items-end">
+                    <div class="col-12 col-md-3">
+                      <label class="form-label mb-1">Exercise ID</label>
+                      <input type="number" min="1" class="form-control {% if re.get('exercise_id') %}is-invalid{% endif %}" name="exercise_id" value="{{ row.exercise_id }}">
+                      {% if re.get('exercise_id') %}<div class="invalid-feedback">{{ re.get('exercise_id') }}</div>{% endif %}
+                    </div>
+                    <div class="col-6 col-md-2">
+                      <label class="form-label mb-1">Sets</label>
+                      <input type="number" min="1" class="form-control {% if re.get('sets') %}is-invalid{% endif %}" name="sets" value="{{ row.sets }}">
+                      {% if re.get('sets') %}<div class="invalid-feedback">{{ re.get('sets') }}</div>{% endif %}
+                    </div>
+                    <div class="col-6 col-md-2">
+                      <label class="form-label mb-1">Reps</label>
+                      <input type="number" min="1" class="form-control {% if re.get('reps') %}is-invalid{% endif %}" name="reps" value="{{ row.reps }}">
+                      {% if re.get('reps') %}<div class="invalid-feedback">{{ re.get('reps') }}</div>{% endif %}
+                    </div>
+                    <div class="col-6 col-md-2">
+                      <label class="form-label mb-1">Weight</label>
+                      <input type="number" step="any" min="0" class="form-control {% if re.get('weight') %}is-invalid{% endif %}" name="weight" value="{{ row.weight }}">
+                      {% if re.get('weight') %}<div class="invalid-feedback">{{ re.get('weight') }}</div>{% endif %}
+                    </div>
+                    <div class="col-6 col-md-2">
+                      <label class="form-label mb-1">Metric</label>
+                      <select class="form-select {% if re.get('weight_metric') %}is-invalid{% endif %}" name="weight_metric">
+                        <option value="" {% if not row.weight_metric %}selected{% endif %}>—</option>
+                        <option value="lb" {% if row.weight_metric == 'lb' %}selected{% endif %}>lb</option>
+                        <option value="kg" {% if row.weight_metric == 'kg' %}selected{% endif %}>kg</option>
+                      </select>
+                      {% if re.get('weight_metric') %}<div class="invalid-feedback">{{ re.get('weight_metric') }}</div>{% endif %}
+                    </div>
+                    <div class="col-12 col-md-1 d-grid">
+                      <button type="button" class="btn btn-outline-danger btn-sm remove-exercise">Remove</button>
+                    </div>
+                    <input type="hidden" name="order_index" value="{{ row.order_index or loop.index }}">
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+
+          <button type="submit" class="btn btn-primary btn-lg w-100">Save changes</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function () {
+    const container = document.getElementById("exercise-rows");
+    const addBtn = document.getElementById("add-exercise");
+    if (!container || !addBtn) return;
+
+    function renumberOrderIndexes() {
+      const hiddenInputs = container.querySelectorAll('input[name="order_index"]');
+      hiddenInputs.forEach((inp, idx) => (inp.value = String(idx + 1)));
+    }
+
+    function makeRow() {
+      const wrapper = document.createElement("div");
+      wrapper.className = "border rounded p-3";
+      wrapper.innerHTML = `
+        <div class="row g-2 align-items-end">
+          <div class="col-12 col-md-3">
+            <label class="form-label mb-1">Exercise ID</label>
+            <input type="number" min="1" class="form-control" name="exercise_id" value="">
+          </div>
+          <div class="col-6 col-md-2">
+            <label class="form-label mb-1">Sets</label>
+            <input type="number" min="1" class="form-control" name="sets" value="">
+          </div>
+          <div class="col-6 col-md-2">
+            <label class="form-label mb-1">Reps</label>
+            <input type="number" min="1" class="form-control" name="reps" value="">
+          </div>
+          <div class="col-6 col-md-2">
+            <label class="form-label mb-1">Weight</label>
+            <input type="number" step="any" min="0" class="form-control" name="weight" value="">
+          </div>
+          <div class="col-6 col-md-2">
+            <label class="form-label mb-1">Metric</label>
+            <select class="form-select" name="weight_metric">
+              <option value="" selected>—</option>
+              <option value="lb">lb</option>
+              <option value="kg">kg</option>
+            </select>
+          </div>
+          <div class="col-12 col-md-1 d-grid">
+            <button type="button" class="btn btn-outline-danger btn-sm remove-exercise">Remove</button>
+          </div>
+          <input type="hidden" name="order_index" value="">
+        </div>
+      `;
+      return wrapper;
+    }
+
+    addBtn.addEventListener("click", function () {
+      container.appendChild(makeRow());
+      renumberOrderIndexes();
+    });
+
+    container.addEventListener("click", function (e) {
+      const btn = e.target.closest(".remove-exercise");
+      if (!btn) return;
+      const row = btn.closest(".border");
+      if (row) row.remove();
+      if (container.children.length === 0) container.appendChild(makeRow());
+      renumberOrderIndexes();
+    });
+
+    renumberOrderIndexes();
+  })();
+</script>
+
+{% endblock %}
+

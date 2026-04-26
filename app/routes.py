@@ -305,3 +305,261 @@ def workouts():
     ]
 
     return render_template('workouts.html', workouts=workouts)
+
+
+@app.route('/workouts/<int:workout_id>/edit', methods=['GET', 'POST'])
+def edit_workout(workout_id):
+    if not session.get('user_id'):
+        return redirect(url_for('login'))
+
+    submitted = None
+    errors = {}
+    row_errors = []
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        SELECT workout_id, user_id, name, description
+        FROM workout
+        WHERE workout_id = %s
+        """,
+        (workout_id,),
+    )
+    w = cur.fetchone()
+    if not w or w[1] != session.get('user_id'):
+        cur.close()
+        flash('Workout not found.', 'danger')
+        return redirect(url_for('workouts'))
+
+    if request.method == 'POST':
+        name = (request.form.get('name') or '').strip()
+        description = (request.form.get('description') or '').strip()
+
+        exercise_ids = request.form.getlist('exercise_id')
+        sets_list = request.form.getlist('sets')
+        reps_list = request.form.getlist('reps')
+        weight_list = request.form.getlist('weight')
+        weight_metric_list = request.form.getlist('weight_metric')
+        order_index_list = request.form.getlist('order_index')
+
+        if not name:
+            errors['name'] = 'Workout name is required.'
+        elif len(name) > 100:
+            errors['name'] = 'Workout name must be 100 characters or less.'
+
+        if description and len(description) > 2000:
+            errors['description'] = 'Description must be 2000 characters or less.'
+
+        rows = []
+        max_len = max(
+            len(exercise_ids),
+            len(sets_list),
+            len(reps_list),
+            len(weight_list),
+            len(weight_metric_list),
+            len(order_index_list),
+        )
+
+        def _get(lst, idx):
+            return (lst[idx] if idx < len(lst) else '') or ''
+
+        allowed_metrics = {'kg', 'lb', ''}
+
+        for i in range(max_len):
+            row_err = {}
+
+            exercise_id_raw = _get(exercise_ids, i).strip()
+            sets_raw = _get(sets_list, i).strip()
+            reps_raw = _get(reps_list, i).strip()
+            weight_raw = _get(weight_list, i).strip()
+            weight_metric_raw = _get(weight_metric_list, i).strip().lower()
+            order_index_raw = _get(order_index_list, i).strip()
+
+            if not any([exercise_id_raw, sets_raw, reps_raw, weight_raw, weight_metric_raw, order_index_raw]):
+                continue
+
+            try:
+                exercise_id = int(exercise_id_raw)
+                if exercise_id <= 0:
+                    row_err['exercise_id'] = 'Must be a positive integer.'
+            except ValueError:
+                row_err['exercise_id'] = 'Exercise ID must be an integer.'
+
+            try:
+                sets_val = int(sets_raw)
+                if sets_val <= 0:
+                    row_err['sets'] = 'Sets must be a positive integer.'
+            except ValueError:
+                row_err['sets'] = 'Sets must be an integer.'
+
+            try:
+                reps_val = int(reps_raw)
+                if reps_val <= 0:
+                    row_err['reps'] = 'Reps must be a positive integer.'
+            except ValueError:
+                row_err['reps'] = 'Reps must be an integer.'
+
+            weight_val = None
+            if weight_raw:
+                try:
+                    weight_val = float(weight_raw)
+                    if weight_val < 0:
+                        row_err['weight'] = 'Weight cannot be negative.'
+                except ValueError:
+                    row_err['weight'] = 'Weight must be a number.'
+
+            if weight_metric_raw not in allowed_metrics:
+                row_err['weight_metric'] = 'Use kg or lb.'
+
+            if weight_val is not None and not weight_metric_raw:
+                row_err['weight_metric'] = 'Select kg or lb when weight is provided.'
+
+            order_index = i + 1
+            if order_index_raw:
+                try:
+                    order_index = int(order_index_raw)
+                    if order_index <= 0:
+                        row_err['order_index'] = 'Order index must be a positive integer.'
+                except ValueError:
+                    row_err['order_index'] = 'Order index must be an integer.'
+
+            rows.append(
+                {
+                    'exercise_id': exercise_id_raw,
+                    'sets': sets_raw,
+                    'reps': reps_raw,
+                    'weight': weight_raw,
+                    'weight_metric': weight_metric_raw,
+                    'order_index': order_index_raw or str(order_index),
+                }
+            )
+            row_errors.append(row_err)
+
+        if not rows:
+            errors['exercises'] = 'Add at least one exercise.'
+
+        submitted = {
+            'user_id': session.get('user_id'),
+            'name': name,
+            'description': description,
+            'exercises': rows,
+        }
+
+        if not errors and any(bool(re) for re in row_errors):
+            errors['exercises'] = 'Fix exercise row errors.'
+
+        if not errors:
+            try:
+                cur.execute(
+                    """
+                    UPDATE workout
+                    SET name = %s, description = %s
+                    WHERE workout_id = %s AND user_id = %s
+                    """,
+                    (name, (description or None), workout_id, session.get('user_id')),
+                )
+
+                cur.execute("DELETE FROM workout_exercise WHERE workout_id = %s", (workout_id,))
+
+                for ex in rows:
+                    cur.execute(
+                        """
+                        INSERT INTO workout_exercise
+                          (workout_id, exercise_id, sets, reps, weight, weight_metric, order_index)
+                        VALUES
+                          (%s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            workout_id,
+                            int(ex['exercise_id']),
+                            int(ex['sets']),
+                            int(ex['reps']),
+                            (float(ex['weight']) if ex['weight'] else None),
+                            (ex['weight_metric'] or None),
+                            int(ex['order_index']) if ex['order_index'] else None,
+                        ),
+                    )
+
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                cur.close()
+
+            flash('Workout updated.', 'success')
+            return redirect(url_for('workouts'))
+
+    # GET (or POST with errors): load existing rows for prefill when not submitted
+    cur.execute(
+        """
+        SELECT exercise_id, sets, reps, weight, weight_metric, order_index
+        FROM workout_exercise
+        WHERE workout_id = %s
+        ORDER BY order_index ASC NULLS LAST, exercise_id ASC
+        """,
+        (workout_id,),
+    )
+    ex_rows = cur.fetchall()
+    cur.close()
+
+    if submitted is None:
+        submitted = {
+            'user_id': session.get('user_id'),
+            'name': w[2],
+            'description': w[3] or '',
+            'exercises': [
+                {
+                    'exercise_id': str(r[0]),
+                    'sets': '' if r[1] is None else str(r[1]),
+                    'reps': '' if r[2] is None else str(r[2]),
+                    'weight': '' if r[3] is None else str(r[3]),
+                    'weight_metric': (r[4] or ''),
+                    'order_index': '' if r[5] is None else str(r[5]),
+                }
+                for r in ex_rows
+            ]
+            or [{'exercise_id': '', 'sets': '', 'reps': '', 'weight': '', 'weight_metric': '', 'order_index': '1'}],
+        }
+
+    return render_template(
+        'edit_workout.html',
+        workout_id=workout_id,
+        submitted=submitted,
+        errors=errors,
+        row_errors=row_errors,
+    )
+
+
+@app.route('/workouts/<int:workout_id>/delete', methods=['POST'])
+def delete_workout(workout_id):
+    if not session.get('user_id'):
+        return redirect(url_for('login'))
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute(
+        "SELECT user_id FROM workout WHERE workout_id = %s",
+        (workout_id,),
+    )
+    w = cur.fetchone()
+    if not w or w[0] != session.get('user_id'):
+        cur.close()
+        flash('Workout not found.', 'danger')
+        return redirect(url_for('workouts'))
+
+    try:
+        cur.execute("DELETE FROM workout_exercise WHERE workout_id = %s", (workout_id,))
+        cur.execute("DELETE FROM workout WHERE workout_id = %s AND user_id = %s", (workout_id, session.get('user_id')))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+
+    flash('Workout deleted.', 'success')
+    return redirect(url_for('workouts'))
