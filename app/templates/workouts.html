@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Workouts — Workout Tracker{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+  <div>
+    <h1 class="mb-1">Workouts</h1>
+    <p class="text-muted mb-0">Your logged workout history.</p>
+  </div>
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-secondary" href="/dashboard">Back</a>
+    <a class="btn btn-primary" href="/workouts/new">+ Log a Workout</a>
+  </div>
+</div>
+
+<div class="card shadow-sm">
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover mb-0 align-middle">
+        <thead class="table-dark">
+          <tr>
+            <th scope="col">Date</th>
+            <th scope="col">Workout</th>
+            <th scope="col" class="text-end">Exercises</th>
+            <th scope="col">Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if workouts and workouts|length > 0 %}
+            {% for w in workouts %}
+              <tr>
+                <td class="text-nowrap">
+                  {% if w.created_at %}
+                    {{ w.created_at.strftime('%Y-%m-%d %H:%M') }}
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+                <td class="fw-semibold">{{ w.name }}</td>
+                <td class="text-end">{{ w.exercise_count }}</td>
+                <td class="text-muted">
+                  {% if w.description %}
+                    {{ w.description }}
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="4" class="p-4 text-center text-muted">
+                No workouts yet. <a href="/workouts/new">Log your first workout</a>.
+              </td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+

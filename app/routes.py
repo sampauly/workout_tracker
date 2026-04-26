@@ -226,3 +226,44 @@ def new_workout():
             return redirect(url_for('dashboard'))
 
     return render_template('new_workout.html', submitted=submitted, errors=errors, row_errors=row_errors)
+
+
+@app.route('/workouts')
+def workouts():
+    if not session.get('user_id'):
+        return redirect(url_for('login'))
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        SELECT
+          w.workout_id,
+          w.name,
+          w.description,
+          w.created_at,
+          COUNT(we.exercise_id) AS exercise_count
+        FROM workout w
+        LEFT JOIN workout_exercise we ON we.workout_id = w.workout_id
+        WHERE w.user_id = %s
+        GROUP BY w.workout_id
+        ORDER BY w.created_at DESC, w.workout_id DESC
+        """,
+        (session.get('user_id'),),
+    )
+    rows = cur.fetchall()
+    cur.close()
+
+    workouts = [
+        {
+            'workout_id': r[0],
+            'name': r[1],
+            'description': r[2],
+            'created_at': r[3],
+            'exercise_count': r[4],
+        }
+        for r in rows
+    ]
+
+    return render_template('workouts.html', workouts=workouts)
