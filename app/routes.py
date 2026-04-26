@@ -51,6 +51,44 @@ def dashboard():
     return render_template('dashboard.html', workout_count=workout_count)
 
 
+@app.route('/exercises')
+def exercises():
+    if not session.get('user_id'):
+        return redirect(url_for('login'))
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    muscle_group = request.args.get('muscle_group')
+    equipment = request.args.get('equipment')
+
+    if muscle_group and equipment:
+        cur.execute(
+            'SELECT exercise_id, name, muscle_group, equipment FROM exercise WHERE muscle_group ILIKE %s AND equipment ILIKE %s ORDER BY name',
+            (f'%{muscle_group}%', f'%{equipment}%')
+        )
+    elif muscle_group:
+        cur.execute(
+            'SELECT exercise_id, name, muscle_group, equipment FROM exercise WHERE muscle_group ILIKE %s ORDER BY name',
+            (f'%{muscle_group}%',)
+        )
+    elif equipment:
+        cur.execute(
+            'SELECT exercise_id, name, muscle_group, equipment FROM exercise WHERE equipment ILIKE %s ORDER BY name',
+            (f'%{equipment}%',)
+        )
+    else:
+        cur.execute(
+            'SELECT exercise_id, name, muscle_group, equipment FROM exercise ORDER BY name'
+        )
+
+    exercises = cur.fetchall()
+    cur.close()
+
+    return render_template('exercises.html', exercises=exercises)
+
+
+
 @app.route('/workouts/new', methods=['GET', 'POST'])
 def new_workout():
     if not session.get('user_id'):
