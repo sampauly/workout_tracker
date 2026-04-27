@@ -1,4 +1,7 @@
 from flask import render_template, session, redirect, url_for, request, flash
+from datetime import datetime, timezone
+import math
+import random
 from app.db import get_db
 from app import app
 
@@ -183,8 +186,9 @@ def new_workout():
             if weight_metric_raw not in allowed_metrics:
                 row_err['weight_metric'] = 'Use kg or lb.'
 
+            # Default to lb if the user entered a weight but left the metric blank.
             if weight_val is not None and not weight_metric_raw:
-                row_err['weight_metric'] = 'Select kg or lb when weight is provided.'
+                weight_metric_raw = 'lb'
 
             order_index = i + 1
             if order_index_raw:
@@ -563,3 +567,446 @@ def delete_workout(workout_id):
 
     flash('Workout deleted.', 'success')
     return redirect(url_for('workouts'))
+
+
+@app.route('/recommend', methods=['GET', 'POST'])
+def recommend():
+    if not session.get('user_id'):
+        return redirect(url_for('login'))
+
+    user_id = session.get('user_id')
+    conn = get_db()
+    cur = conn.cursor()
+
+    # Ensure a fair calculation: require >5 logged workouts.
+    cur.execute("SELECT COUNT(*) FROM workout WHERE user_id = %s", (user_id,))
+    workout_count = cur.fetchone()[0] or 0
+    if workout_count <= 5:
+        cur.close()
+        flash('Log at least 6 workouts to get recommendations.', 'warning')
+        return redirect(url_for('workouts'))
+
+    # Muscle group stats: recency + total usage (based on workout_exercise history).
+    cur.execute(
+        """
+        SELECT
+          e.muscle_group,
+          MAX(w.created_at) AS last_trained_at,
+          COUNT(*)          AS exercise_entries
+        FROM workout w
+        JOIN workout_exercise we ON we.workout_id = w.workout_id
+        JOIN exercise e ON e.exercise_id = we.exercise_id
+        WHERE w.user_id = %s
+          AND e.muscle_group IS NOT NULL
+          AND BTRIM(e.muscle_group) <> ''
+        GROUP BY e.muscle_group
+        """,
+        (user_id,),
+    )
+    mg_rows = cur.fetchall()
+
+    # If the user has workouts but none of the exercises have muscle groups set.
+    if not mg_rows:
+        cur.close()
+        flash('Not enough muscle group data on exercises to recommend yet.', 'warning')
+        return redirect(url_for('exercises'))
+
+    cur.execute(
+        """
+        SELECT COUNT(*)
+        FROM workout w
+        JOIN workout_exercise we ON we.workout_id = w.workout_id
+        JOIN exercise e ON e.exercise_id = we.exercise_id
+        WHERE w.user_id = %s
+          AND e.muscle_group IS NOT NULL
+          AND BTRIM(e.muscle_group) <> ''
+        """,
+        (user_id,),
+    )
+    total_entries = cur.fetchone()[0] or 0
+    total_entries = max(int(total_entries), 1)
+
+    # Avoid recommending exercises from the last 2 workouts when possible.
+    cur.execute(
+        """
+        WITH recent AS (
+          SELECT workout_id
+          FROM workout
+          WHERE user_id = %s
+          ORDER BY created_at DESC, workout_id DESC
+          LIMIT 2
+        )
+        SELECT DISTINCT we.exercise_id
+        FROM workout_exercise we
+        JOIN recent r ON r.workout_id = we.workout_id
+        """,
+        (user_id,),
+    )
+    recent_exercise_ids = {r[0] for r in cur.fetchall()}
+
+    now = datetime.now(timezone.utc)
+    mg_stats = []
+    for muscle_group, last_trained_at, exercise_entries in mg_rows:
+        # created_at is typically tz-naive in many setups; treat it as UTC for scoring.
+        if last_trained_at is None:
+            days_since = 999.0
+        else:
+            if getattr(last_trained_at, "tzinfo", None) is None:
+                last_trained_at = last_trained_at.replace(tzinfo=timezone.utc)
+            days_since = max(0.0, (now - last_trained_at).total_seconds() / 86400.0)
+
+        entries = int(exercise_entries or 0)
+        freq = entries / total_entries  # 0..1
+
+        # Score increases when it's been longer since trained, and when it's less frequent overall.
+        # Recency is capped to reduce huge gaps dominating.
+        recency_component = min(days_since, 60.0) / 60.0  # 0..1
+        rarity_component = 1.0 - min(max(freq, 0.0), 1.0)  # 0..1
+        # Slightly favor recency over rarity to avoid ignoring recovery patterns.
+        score = 0.65 * recency_component + 0.35 * rarity_component
+
+        mg_stats.append(
+            {
+                "muscle_group": muscle_group,
+                "last_trained_at": last_trained_at,
+                "days_since": days_since,
+                "entries": entries,
+                "score": score,
+            }
+        )
+
+    mg_stats.sort(key=lambda x: x["score"], reverse=True)
+
+    # Choose up to 3 target groups, but keep some diversity if scores are clustered.
+    top_groups = [m["muscle_group"] for m in mg_stats[:3]]
+    if len(top_groups) < 3:
+        # Fallback: pad with any remaining groups.
+        for m in mg_stats:
+            if m["muscle_group"] not in top_groups:
+                top_groups.append(m["muscle_group"])
+            if len(top_groups) >= 3:
+                break
+
+    # Load exercise catalog for search/autocomplete (and for name display).
+    cur.execute(
+        """
+        SELECT exercise_id, name, muscle_group, equipment
+        FROM exercise
+        ORDER BY name ASC
+        """
+    )
+    exercise_catalog_rows = cur.fetchall()
+    exercise_catalog = [
+        {"exercise_id": r[0], "name": r[1], "muscle_group": r[2], "equipment": r[3]}
+        for r in exercise_catalog_rows
+    ]
+    exercise_name_by_id = {r[0]: r[1] for r in exercise_catalog_rows}
+
+    # Pull a pool of candidate exercises per group and sample a small set.
+    recommended = []
+    used_exercise_ids = set()
+
+    def _suggest_sets_reps(exercise_id: int):
+        cur.execute(
+            """
+            SELECT AVG(we.sets)::float, AVG(we.reps)::float
+            FROM workout w
+            JOIN workout_exercise we ON we.workout_id = w.workout_id
+            WHERE w.user_id = %s AND we.exercise_id = %s
+            """,
+            (user_id, exercise_id),
+        )
+        avg_sets, avg_reps = cur.fetchone()
+        sets_val = int(round(avg_sets)) if avg_sets else 3
+        reps_val = int(round(avg_reps)) if avg_reps else 10
+        sets_val = min(max(sets_val, 2), 6)
+        reps_val = min(max(reps_val, 5), 20)
+        return sets_val, reps_val
+
+    for mg in top_groups:
+        # Prefer exercises not in recent workouts; if that filters everything out, allow recent ones.
+        cur.execute(
+            """
+            SELECT exercise_id, name, muscle_group, equipment
+            FROM exercise
+            WHERE muscle_group = %s
+            ORDER BY RANDOM()
+            LIMIT 20
+            """,
+            (mg,),
+        )
+        pool = cur.fetchall()
+
+        # Re-rank the pool with a deterministic-ish shuffle and recent-exclusion preference.
+        random.shuffle(pool)
+        pool_preferred = [p for p in pool if p[0] not in recent_exercise_ids]
+        pool_fallback = [p for p in pool if p[0] in recent_exercise_ids]
+        ordered_pool = pool_preferred + pool_fallback
+
+        picked_for_group = 0
+        for ex_id, ex_name, ex_mg, ex_equipment in ordered_pool:
+            if ex_id in used_exercise_ids:
+                continue
+            sets_val, reps_val = _suggest_sets_reps(int(ex_id))
+            recommended.append(
+                {
+                    "exercise_id": ex_id,
+                    "name": ex_name,
+                    "muscle_group": ex_mg,
+                    "equipment": ex_equipment,
+                    "sets": sets_val,
+                    "reps": reps_val,
+                }
+            )
+            used_exercise_ids.add(ex_id)
+            picked_for_group += 1
+            if picked_for_group >= 2:
+                break
+
+    submitted = None
+    errors = {}
+    row_errors = []
+
+    if request.method == 'POST':
+        name = (request.form.get('name') or '').strip()
+        description = (request.form.get('description') or '').strip()
+
+        exercise_ids = request.form.getlist('exercise_id')
+        exercise_names = request.form.getlist('exercise_name')
+        sets_list = request.form.getlist('sets')
+        reps_list = request.form.getlist('reps')
+        weight_list = request.form.getlist('weight')
+        weight_metric_list = request.form.getlist('weight_metric')
+        order_index_list = request.form.getlist('order_index')
+
+        if not name:
+            errors['name'] = 'Workout name is required.'
+        elif len(name) > 100:
+            errors['name'] = 'Workout name must be 100 characters or less.'
+
+        if description and len(description) > 2000:
+            errors['description'] = 'Description must be 2000 characters or less.'
+
+        rows = []
+        max_len = max(
+            len(exercise_ids),
+            len(exercise_names),
+            len(sets_list),
+            len(reps_list),
+            len(weight_list),
+            len(weight_metric_list),
+            len(order_index_list),
+        )
+
+        def _get(lst, idx):
+            return (lst[idx] if idx < len(lst) else '') or ''
+
+        allowed_metrics = {'kg', 'lb', ''}
+
+        for i in range(max_len):
+            row_err = {}
+
+            exercise_id_raw = _get(exercise_ids, i).strip()
+            exercise_name_raw = _get(exercise_names, i).strip()
+            sets_raw = _get(sets_list, i).strip()
+            reps_raw = _get(reps_list, i).strip()
+            weight_raw = _get(weight_list, i).strip()
+            weight_metric_raw = _get(weight_metric_list, i).strip().lower()
+            order_index_raw = _get(order_index_list, i).strip()
+
+            # Allow completely blank rows (e.g. if the UI leaves one behind)
+            if not any([exercise_id_raw, exercise_name_raw, sets_raw, reps_raw, weight_raw, weight_metric_raw, order_index_raw]):
+                continue
+
+            exercise_id = None
+            if exercise_id_raw:
+                try:
+                    exercise_id = int(exercise_id_raw)
+                    if exercise_id <= 0:
+                        row_err['exercise_id'] = 'Must be a positive integer.'
+                except ValueError:
+                    row_err['exercise_id'] = 'Exercise ID must be an integer.'
+            else:
+                # Allow selecting by name (UI should set exercise_id, but we fall back just in case).
+                if exercise_name_raw:
+                    matches = [
+                        ex["exercise_id"]
+                        for ex in exercise_catalog
+                        if (ex["name"] or "").strip().lower() == exercise_name_raw.strip().lower()
+                    ]
+                    if len(matches) == 1:
+                        exercise_id = int(matches[0])
+                        exercise_id_raw = str(exercise_id)
+                    else:
+                        row_err['exercise_id'] = 'Pick an exercise from search (name must match exactly).'
+                else:
+                    row_err['exercise_id'] = 'Pick an exercise.'
+
+            sets_val = None
+            try:
+                sets_val = int(sets_raw)
+                if sets_val <= 0:
+                    row_err['sets'] = 'Sets must be a positive integer.'
+            except ValueError:
+                row_err['sets'] = 'Sets must be an integer.'
+
+            reps_val = None
+            try:
+                reps_val = int(reps_raw)
+                if reps_val <= 0:
+                    row_err['reps'] = 'Reps must be a positive integer.'
+            except ValueError:
+                row_err['reps'] = 'Reps must be an integer.'
+
+            weight_val = None
+            if weight_raw:
+                try:
+                    weight_val = float(weight_raw)
+                    if weight_val < 0:
+                        row_err['weight'] = 'Weight cannot be negative.'
+                except ValueError:
+                    row_err['weight'] = 'Weight must be a number.'
+
+            if weight_metric_raw not in allowed_metrics:
+                row_err['weight_metric'] = 'Use kg or lb.'
+
+            if weight_val is not None and not weight_metric_raw:
+                row_err['weight_metric'] = 'Select kg or lb when weight is provided.'
+
+            order_index = i + 1
+            if order_index_raw:
+                try:
+                    order_index = int(order_index_raw)
+                    if order_index <= 0:
+                        row_err['order_index'] = 'Order index must be a positive integer.'
+                except ValueError:
+                    row_err['order_index'] = 'Order index must be an integer.'
+
+            rows.append(
+                {
+                    'exercise_id': exercise_id_raw,
+                    'exercise_name': exercise_name_raw,
+                    'sets': sets_raw,
+                    'reps': reps_raw,
+                    'weight': weight_raw,
+                    'weight_metric': weight_metric_raw,
+                    'order_index': order_index_raw or str(order_index),
+                }
+            )
+            row_errors.append(row_err)
+
+        if not rows:
+            errors['exercises'] = 'Add at least one exercise.'
+
+        submitted = {
+            'user_id': user_id,
+            'name': name,
+            'description': description,
+            'exercises': rows,
+        }
+
+        if not errors and any(bool(re) for re in row_errors):
+            errors['exercises'] = 'Fix exercise row errors.'
+
+        # Ensure exercises exist (and belong to the catalog).
+        if not errors:
+            for ex in rows:
+                try:
+                    cur.execute("SELECT 1 FROM exercise WHERE exercise_id = %s", (int(ex['exercise_id']),))
+                    if cur.fetchone() is None:
+                        errors['exercises'] = 'One or more exercise IDs do not exist.'
+                        break
+                except Exception:
+                    errors['exercises'] = 'One or more exercise IDs are invalid.'
+                    break
+
+        # Backfill exercise_name for display when POSTing invalid data (or when JS didn't set it).
+        if submitted and submitted.get('exercises'):
+            for ex in submitted['exercises']:
+                if not ex.get('exercise_name') and ex.get('exercise_id'):
+                    try:
+                        ex_id_int = int(ex['exercise_id'])
+                        ex['exercise_name'] = exercise_name_by_id.get(ex_id_int, '')
+                    except Exception:
+                        pass
+
+        if not errors:
+            try:
+                cur.execute(
+                    """
+                    INSERT INTO workout (user_id, name, description)
+                    VALUES (%s, %s, %s)
+                    RETURNING workout_id
+                    """,
+                    (user_id, name, (description or None)),
+                )
+                workout_id = cur.fetchone()[0]
+
+                for ex in rows:
+                    cur.execute(
+                        """
+                        INSERT INTO workout_exercise
+                          (workout_id, exercise_id, sets, reps, weight, weight_metric, order_index)
+                        VALUES
+                          (%s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            workout_id,
+                            int(ex['exercise_id']),
+                            int(ex['sets']),
+                            int(ex['reps']),
+                            (float(ex['weight']) if ex['weight'] else None),
+                            (ex['weight_metric'] or None),
+                            int(ex['order_index']) if ex['order_index'] else None,
+                        ),
+                    )
+
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                cur.close()
+
+            flash('Recommended workout logged.', 'success')
+            return redirect(url_for('workouts'))
+
+    # GET (or POST with errors): build a default editable "submitted" structure from the recommendation
+    if submitted is None:
+        submitted = {
+            'user_id': user_id,
+            'name': 'Recommended workout',
+            'description': f"Recommended focus: {', '.join(top_groups)}",
+            'exercises': [
+                {
+                    'exercise_id': str(ex['exercise_id']),
+                    'exercise_name': exercise_name_by_id.get(ex['exercise_id'], ex['name']),
+                    'sets': str(ex['sets']),
+                    'reps': str(ex['reps']),
+                    'weight': '',
+                    'weight_metric': 'lb',
+                    'order_index': str(i + 1),
+                }
+                for i, ex in enumerate(recommended)
+            ]
+            or [{'exercise_id': '', 'sets': '', 'reps': '', 'weight': '', 'weight_metric': '', 'order_index': '1'}],
+        }
+
+    cur.close()
+
+    # If we somehow couldn't pick anything (e.g. empty exercise catalog), fail gracefully.
+    if not recommended and request.method == 'GET':
+        flash('No exercises available to recommend yet.', 'warning')
+        return redirect(url_for('exercises'))
+
+    return render_template(
+        "recommend.html",
+        workout_count=workout_count,
+        muscle_groups=mg_stats,
+        top_groups=top_groups,
+        recommended=recommended,
+        exercise_catalog=exercise_catalog,
+        submitted=submitted,
+        errors=errors,
+        row_errors=row_errors,
+    )

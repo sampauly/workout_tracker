@@ -1,0 +1,358 @@
+{% extends "base.html" %}
+{% block title %}Recommendation — Workout Tracker{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+  <div>
+    <h1 class="mb-1">Recommended workout</h1>
+  </div>
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-secondary" href="/dashboard">Back</a>
+    <a class="btn btn-primary" href="/workouts/new">+ Log a Workout</a>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-7">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <form method="POST" action="/recommend" novalidate>
+          <div class="mb-3">
+            <label for="name" class="form-label">Workout name</label>
+            <input
+              type="text"
+              class="form-control {% if errors.get('name') %}is-invalid{% endif %}"
+              id="name"
+              name="name"
+              maxlength="100"
+              value="{{ (submitted.name if submitted else '') }}"
+              required
+            />
+            {% if errors.get('name') %}
+              <div class="invalid-feedback">{{ errors.get('name') }}</div>
+            {% else %}
+              <div class="form-text">Required. Max 100 characters.</div>
+            {% endif %}
+          </div>
+
+          <div class="mb-3">
+            <label for="description" class="form-label">Notes (optional)</label>
+            <textarea
+              class="form-control {% if errors.get('description') %}is-invalid{% endif %}"
+              id="description"
+              name="description"
+              maxlength="2000"
+              rows="3"
+              placeholder="What you want to focus on today..."
+            >{{ (submitted.description if submitted else '') }}</textarea>
+            {% if errors.get('description') %}
+              <div class="invalid-feedback">{{ errors.get('description') }}</div>
+            {% else %}
+              <div class="form-text">Max 2000 characters.</div>
+            {% endif %}
+          </div>
+
+          <div class="mb-2 d-flex align-items-center justify-content-between gap-2">
+            <h5 class="card-title mb-0">Today's plan</h5>
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="add-exercise">+ Add exercise</button>
+          </div>
+
+          <div class="mb-3">
+            <label for="exercise-search" class="form-label">Search exercises</label>
+            <input id="exercise-search" type="text" class="form-control" placeholder="Type to search (name, muscle group, equipment)…">
+            <div id="exercise-search-results" class="list-group mt-2" style="max-height: 220px; overflow: auto;"></div>
+          </div>
+
+          {% if errors.get('exercises') %}
+            <div class="alert alert-danger py-2 mb-2">{{ errors.get('exercises') }}</div>
+          {% else %}
+          {% endif %}
+
+          <div id="exercise-rows" class="d-flex flex-column gap-2">
+            {% set rows = (submitted.exercises if submitted and submitted.exercises else []) %}
+            {% for row in rows %}
+              {% set re = (row_errors[loop.index0] if row_errors and (loop.index0 < row_errors|length) else {}) %}
+              <div class="border rounded p-3">
+                <div class="row g-2 align-items-end">
+                  <div class="col-12 col-md-4">
+                    <label class="form-label mb-1">Exercise</label>
+                    <input type="hidden" name="exercise_id" value="{{ row.exercise_id }}">
+                    <input type="text" class="form-control {% if re.get('exercise_id') %}is-invalid{% endif %}" name="exercise_name" value="{{ row.exercise_name or '' }}" placeholder="Search and select an exercise">
+                    {% if re.get('exercise_id') %}<div class="invalid-feedback">{{ re.get('exercise_id') }}</div>{% endif %}
+                  </div>
+                  <div class="col-6 col-md-2">
+                    <label class="form-label mb-1">Sets</label>
+                    <input type="number" min="1" class="form-control {% if re.get('sets') %}is-invalid{% endif %}" name="sets" value="{{ row.sets }}">
+                    {% if re.get('sets') %}<div class="invalid-feedback">{{ re.get('sets') }}</div>{% endif %}
+                  </div>
+                  <div class="col-6 col-md-2">
+                    <label class="form-label mb-1">Reps</label>
+                    <input type="number" min="1" class="form-control {% if re.get('reps') %}is-invalid{% endif %}" name="reps" value="{{ row.reps }}">
+                    {% if re.get('reps') %}<div class="invalid-feedback">{{ re.get('reps') }}</div>{% endif %}
+                  </div>
+                  <div class="col-6 col-md-2">
+                    <label class="form-label mb-1">Weight</label>
+                    <input type="number" step="any" min="0" class="form-control {% if re.get('weight') %}is-invalid{% endif %}" name="weight" value="{{ row.weight }}">
+                    {% if re.get('weight') %}<div class="invalid-feedback">{{ re.get('weight') }}</div>{% endif %}
+                  </div>
+                  <div class="col-6 col-md-2">
+                    <label class="form-label mb-1">Metric</label>
+                    <select class="form-select {% if re.get('weight_metric') %}is-invalid{% endif %}" name="weight_metric">
+                      <option value="" {% if not row.weight_metric %}selected{% endif %}>—</option>
+                      <option value="lb" {% if (not row.weight_metric) or (row.weight_metric == 'lb') %}selected{% endif %}>lb</option>
+                      <option value="kg" {% if row.weight_metric == 'kg' %}selected{% endif %}>kg</option>
+                    </select>
+                    {% if re.get('weight_metric') %}<div class="invalid-feedback">{{ re.get('weight_metric') }}</div>{% endif %}
+                  </div>
+                  <div class="col-12 col-md-1 d-grid">
+                    <button type="button" class="btn btn-outline-danger btn-sm remove-exercise">Remove</button>
+                  </div>
+                  <input type="hidden" name="order_index" value="{{ row.order_index or loop.index }}">
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+
+          <div class="d-flex gap-2 mt-3">
+            <button type="submit" class="btn btn-primary flex-grow-1">Log this workout</button>
+            <a class="btn btn-outline-secondary" href="/recommend">Reset</a>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-5">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h5 class="card-title mb-3">Muscle group priority</h5>
+        <div class="table-responsive">
+          <table class="table table-sm mb-0 align-middle">
+            <thead class="table-light">
+              <tr>
+                <th>Group</th>
+                <th class="text-end">Days since</th>
+                <th class="text-end">Entries</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for mg in muscle_groups %}
+              <tr class="{% if mg.muscle_group in top_groups %}table-success{% endif %}">
+                <td class="fw-semibold">{{ mg.muscle_group }}</td>
+                <td class="text-end">
+                  {% if mg.days_since >= 999 %}
+                    —
+                  {% else %}
+                    {{ mg.days_since|round(0, 'common')|int }}
+                  {% endif %}
+                </td>
+                <td class="text-end">{{ mg.entries }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function () {
+    const container = document.getElementById("exercise-rows");
+    const addBtn = document.getElementById("add-exercise");
+    if (!container || !addBtn) return;
+
+    const exerciseCatalog = {{ exercise_catalog|tojson }};
+    const byId = new Map(exerciseCatalog.map(e => [String(e.exercise_id), e]));
+
+    function escapeHtml(s) {
+      return String(s || "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+
+    function renumberOrderIndexes() {
+      const hiddenInputs = container.querySelectorAll('input[name="order_index"]');
+      hiddenInputs.forEach((inp, idx) => (inp.value = String(idx + 1)));
+    }
+
+    function setExerciseForRow(rowEl, exercise) {
+      if (!rowEl || !exercise) return;
+      const idInput = rowEl.querySelector('input[name="exercise_id"]');
+      const nameInput = rowEl.querySelector('input[name="exercise_name"]');
+      if (idInput) idInput.value = String(exercise.exercise_id);
+      if (nameInput) nameInput.value = exercise.name || "";
+    }
+
+    function makeRow() {
+      const wrapper = document.createElement("div");
+      wrapper.className = "border rounded p-3";
+      wrapper.innerHTML = `
+        <div class="row g-2 align-items-end">
+          <div class="col-12 col-md-4">
+            <label class="form-label mb-1">Exercise</label>
+            <input type="hidden" name="exercise_id" value="">
+            <input type="text" class="form-control" name="exercise_name" value="" placeholder="Search and select an exercise">
+          </div>
+          <div class="col-6 col-md-2">
+            <label class="form-label mb-1">Sets</label>
+            <input type="number" min="1" class="form-control" name="sets" value="3">
+          </div>
+          <div class="col-6 col-md-2">
+            <label class="form-label mb-1">Reps</label>
+            <input type="number" min="1" class="form-control" name="reps" value="10">
+          </div>
+          <div class="col-6 col-md-2">
+            <label class="form-label mb-1">Weight</label>
+            <input type="number" step="any" min="0" class="form-control" name="weight" value="">
+          </div>
+          <div class="col-6 col-md-2">
+            <label class="form-label mb-1">Metric</label>
+            <select class="form-select" name="weight_metric">
+              <option value="">—</option>
+              <option value="lb" selected>lb</option>
+              <option value="kg">kg</option>
+            </select>
+          </div>
+          <div class="col-12 col-md-1 d-grid">
+            <button type="button" class="btn btn-outline-danger btn-sm remove-exercise">Remove</button>
+          </div>
+          <input type="hidden" name="order_index" value="">
+        </div>
+      `;
+      return wrapper;
+    }
+
+    addBtn.addEventListener("click", function () {
+      container.appendChild(makeRow());
+      renumberOrderIndexes();
+    });
+
+    // Global search -> click to add row
+    const searchInput = document.getElementById("exercise-search");
+    const searchResults = document.getElementById("exercise-search-results");
+
+    function renderSearchResults(list) {
+      if (!searchResults) return;
+      searchResults.innerHTML = "";
+      list.slice(0, 25).forEach(ex => {
+        const a = document.createElement("button");
+        a.type = "button";
+        a.className = "list-group-item list-group-item-action";
+        a.innerHTML = `<div class="d-flex justify-content-between gap-2">
+          <div>
+            <div class="fw-semibold">${escapeHtml(ex.name)}</div>
+            <div class="small text-muted">${escapeHtml(ex.muscle_group || "—")} · ${escapeHtml(ex.equipment || "—")}</div>
+          </div>
+          <div class="small text-muted">Add</div>
+        </div>`;
+        a.addEventListener("click", () => {
+          const row = makeRow();
+          container.appendChild(row);
+          setExerciseForRow(row, ex);
+          renumberOrderIndexes();
+          if (searchInput) searchInput.value = "";
+          renderSearchResults([]);
+        });
+        searchResults.appendChild(a);
+      });
+    }
+
+    if (searchInput) {
+      searchInput.addEventListener("input", function () {
+        const q = (searchInput.value || "").trim().toLowerCase();
+        if (!q) return renderSearchResults([]);
+        const matches = exerciseCatalog.filter(ex => {
+          const hay = `${ex.name || ""} ${ex.muscle_group || ""} ${ex.equipment || ""}`.toLowerCase();
+          return hay.includes(q);
+        });
+        renderSearchResults(matches);
+      });
+    }
+
+    // Per-row autocomplete via datalist-like overlay
+    const rowPicker = document.createElement("div");
+    rowPicker.style.position = "absolute";
+    rowPicker.style.zIndex = "1000";
+    rowPicker.style.display = "none";
+    rowPicker.className = "list-group shadow";
+    document.body.appendChild(rowPicker);
+
+    let activeRow = null;
+    function closePicker() {
+      rowPicker.style.display = "none";
+      rowPicker.innerHTML = "";
+      activeRow = null;
+    }
+
+    function openPickerForRow(rowEl, inputEl, q) {
+      const rect = inputEl.getBoundingClientRect();
+      rowPicker.style.left = `${rect.left + window.scrollX}px`;
+      rowPicker.style.top = `${rect.bottom + window.scrollY}px`;
+      rowPicker.style.width = `${rect.width}px`;
+      rowPicker.style.display = "block";
+      rowPicker.innerHTML = "";
+
+      const matches = exerciseCatalog
+        .filter(ex => (ex.name || "").toLowerCase().includes(q))
+        .slice(0, 10);
+
+      matches.forEach(ex => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "list-group-item list-group-item-action";
+        btn.innerHTML = `<div class="fw-semibold">${escapeHtml(ex.name)}</div>
+          <div class="small text-muted">${escapeHtml(ex.muscle_group || "—")} · ${escapeHtml(ex.equipment || "—")}</div>`;
+        btn.addEventListener("click", () => {
+          setExerciseForRow(rowEl, ex);
+          closePicker();
+        });
+        rowPicker.appendChild(btn);
+      });
+
+      if (matches.length === 0) {
+        const div = document.createElement("div");
+        div.className = "list-group-item";
+        div.textContent = "No matches";
+        rowPicker.appendChild(div);
+      }
+    }
+
+    container.addEventListener("input", function (e) {
+      const input = e.target.closest('input[name="exercise_name"]');
+      if (!input) return;
+      const rowEl = input.closest(".border");
+      const q = (input.value || "").trim().toLowerCase();
+      activeRow = rowEl;
+      if (!q) return closePicker();
+      openPickerForRow(rowEl, input, q);
+    });
+
+    container.addEventListener("focusin", function (e) {
+      const input = e.target.closest('input[name="exercise_name"]');
+      if (!input) return;
+      const rowEl = input.closest(".border");
+      const q = (input.value || "").trim().toLowerCase();
+      activeRow = rowEl;
+      if (q) openPickerForRow(rowEl, input, q);
+    });
+
+    document.addEventListener("click", function (e) {
+      if (rowPicker.contains(e.target)) return;
+      if (e.target.closest('input[name="exercise_name"]')) return;
+      closePicker();
+    });
+
+    container.addEventListener("click", function (e) {
+      const btn = e.target.closest(".remove-exercise");
+      if (!btn) return;
+      const row = btn.closest(".border");
+      if (row) row.remove();
+      if (container.children.length === 0) container.appendChild(makeRow());
+      renumberOrderIndexes();
+    });
+
+    renumberOrderIndexes();
+  })();
+</script>
+{% endblock %}
+
