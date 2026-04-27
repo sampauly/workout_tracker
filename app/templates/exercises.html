@@ -2,8 +2,52 @@
 {% block title %}Exercises — Workout Tracker{% endblock %}
 
 {% block content %}
-<h1 class="mb-1">Exercise Catalog</h1>
-<p class="text-muted mb-4">Browse and search available exercises.</p>
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+  <div>
+    <h1 class="mb-1">Exercise Catalog</h1>
+    <p class="text-muted mb-0">Browse and search available exercises.</p>
+  </div>
+  <button class="btn btn-primary" type="button" data-bs-toggle="collapse" data-bs-target="#add-exercise-form">
+    + Add Exercise
+  </button>
+</div>
+
+<div class="collapse {% if add_errors %}show{% endif %} mb-4" id="add-exercise-form">
+  <div class="card shadow-sm">
+    <div class="card-body">
+      <h5 class="card-title mb-3">Add to Catalog</h5>
+      <form method="POST" action="/exercises" novalidate>
+        <div class="row g-2 align-items-end">
+          <div class="col-sm-4">
+            <label class="form-label mb-1">Name <span class="text-danger">*</span></label>
+            <input type="text" name="name" maxlength="100"
+                   class="form-control {% if add_errors.get('name') %}is-invalid{% endif %}"
+                   placeholder="e.g. Incline Dumbbell Press"
+                   value="{{ (add_form.name if add_form else '') }}">
+            {% if add_errors.get('name') %}
+              <div class="invalid-feedback">{{ add_errors.get('name') }}</div>
+            {% endif %}
+          </div>
+          <div class="col-sm-3">
+            <label class="form-label mb-1">Muscle Group</label>
+            <input type="text" name="muscle_group" maxlength="100" class="form-control"
+                   placeholder="e.g. Chest"
+                   value="{{ (add_form.muscle_group if add_form else '') }}">
+          </div>
+          <div class="col-sm-3">
+            <label class="form-label mb-1">Equipment</label>
+            <input type="text" name="equipment" maxlength="100" class="form-control"
+                   placeholder="e.g. Dumbbell"
+                   value="{{ (add_form.equipment if add_form else '') }}">
+          </div>
+          <div class="col-sm-2 d-grid">
+            <button type="submit" class="btn btn-success">Add</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
 
 <form method="GET" class="row g-2 mb-4">
     <div class="col-sm-4">

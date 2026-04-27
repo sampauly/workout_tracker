@@ -54,7 +54,7 @@ def dashboard():
     return render_template('dashboard.html', workout_count=workout_count)
 
 
-@app.route('/exercises')
+@app.route('/exercises', methods=['GET', 'POST'])
 def exercises():
     if not session.get('user_id'):
         return redirect(url_for('login'))
@@ -62,34 +62,143 @@ def exercises():
     conn = get_db()
     cur = conn.cursor()
 
-    muscle_group = request.args.get('muscle_group')
-    equipment = request.args.get('equipment')
+    add_errors = {}
 
-    if muscle_group and equipment:
+    if request.method == 'POST':
+        name = (request.form.get('name') or '').strip()
+        muscle_group = (request.form.get('muscle_group') or '').strip()
+        equipment = (request.form.get('equipment') or '').strip()
+
+        if not name:
+            add_errors['name'] = 'Exercise name is required.'
+        elif len(name) > 100:
+            add_errors['name'] = 'Max 100 characters.'
+
+        if not add_errors:
+            cur.execute(
+                'INSERT INTO exercise (name, muscle_group, equipment) VALUES (%s, %s, %s)',
+                (name, muscle_group or None, equipment or None),
+            )
+            conn.commit()
+            cur.close()
+            flash(f'"{name}" added to the catalog.', 'success')
+            return redirect(url_for('exercises'))
+
+    muscle_group_filter = request.args.get('muscle_group')
+    equipment_filter = request.args.get('equipment')
+
+    if muscle_group_filter and equipment_filter:
         cur.execute(
             'SELECT exercise_id, name, muscle_group, equipment FROM exercise WHERE muscle_group ILIKE %s AND equipment ILIKE %s ORDER BY name',
-            (f'%{muscle_group}%', f'%{equipment}%')
+            (f'%{muscle_group_filter}%', f'%{equipment_filter}%')
         )
-    elif muscle_group:
+    elif muscle_group_filter:
         cur.execute(
             'SELECT exercise_id, name, muscle_group, equipment FROM exercise WHERE muscle_group ILIKE %s ORDER BY name',
-            (f'%{muscle_group}%',)
+            (f'%{muscle_group_filter}%',)
         )
-    elif equipment:
+    elif equipment_filter:
         cur.execute(
             'SELECT exercise_id, name, muscle_group, equipment FROM exercise WHERE equipment ILIKE %s ORDER BY name',
-            (f'%{equipment}%',)
+            (f'%{equipment_filter}%',)
         )
     else:
-        cur.execute(
-            'SELECT exercise_id, name, muscle_group, equipment FROM exercise ORDER BY name'
-        )
+        cur.execute('SELECT exercise_id, name, muscle_group, equipment FROM exercise ORDER BY name')
 
     exercises = cur.fetchall()
     cur.close()
 
-    return render_template('exercises.html', exercises=exercises)
+    return render_template('exercises.html', exercises=exercises, add_errors=add_errors,
+                           add_form={'name': request.form.get('name', ''),
+                                     'muscle_group': request.form.get('muscle_group', ''),
+                                     'equipment': request.form.get('equipment', '')} if add_errors else None)
 
+
+
+@app.route('/stats')
+def stats():
+    if not session.get('user_id'):
+        return redirect(url_for('login'))
+
+    user_id = session.get('user_id')
+    conn = get_db()
+    cur = conn.cursor()
+
+    # Aggregate: total workouts + average exercises per workout
+    cur.execute(
+        """
+        SELECT
+            COUNT(DISTINCT w.workout_id)          AS total_workouts,
+            ROUND(AVG(sub.cnt)::numeric, 1)       AS avg_exercises
+        FROM workout w
+        LEFT JOIN (
+            SELECT workout_id, COUNT(*) AS cnt
+            FROM workout_exercise
+            GROUP BY workout_id
+        ) sub ON sub.workout_id = w.workout_id
+        WHERE w.user_id = %s
+        """,
+        (user_id,),
+    )
+    row = cur.fetchone()
+    total_workouts = row[0] or 0
+    avg_exercises = row[1] or 0
+
+    # Join + aggregate: top 5 heaviest planned lifts
+    cur.execute(
+        """
+        SELECT
+            e.name,
+            e.muscle_group,
+            MAX(we.weight)   AS max_weight,
+            we.weight_metric
+        FROM workout_exercise we
+        JOIN workout  w ON w.workout_id  = we.workout_id
+        JOIN exercise e ON e.exercise_id = we.exercise_id
+        WHERE w.user_id = %s
+          AND we.weight IS NOT NULL
+          AND we.weight > 0
+        GROUP BY e.name, e.muscle_group, we.weight_metric
+        ORDER BY max_weight DESC
+        LIMIT 5
+        """,
+        (user_id,),
+    )
+    top_lifts = [
+        {'name': r[0], 'muscle_group': r[1], 'max_weight': r[2], 'weight_metric': r[3]}
+        for r in cur.fetchall()
+    ]
+
+    # Join + aggregate: most trained muscle groups
+    cur.execute(
+        """
+        SELECT
+            e.muscle_group,
+            COUNT(*) AS times_trained
+        FROM workout_exercise we
+        JOIN workout  w ON w.workout_id  = we.workout_id
+        JOIN exercise e ON e.exercise_id = we.exercise_id
+        WHERE w.user_id = %s
+          AND e.muscle_group IS NOT NULL
+          AND BTRIM(e.muscle_group) <> ''
+        GROUP BY e.muscle_group
+        ORDER BY times_trained DESC
+        """,
+        (user_id,),
+    )
+    muscle_groups = [
+        {'muscle_group': r[0], 'times_trained': r[1]}
+        for r in cur.fetchall()
+    ]
+    cur.close()
+
+    return render_template(
+        'stats.html',
+        total_workouts=total_workouts,
+        avg_exercises=avg_exercises,
+        top_lifts=top_lifts,
+        muscle_groups=muscle_groups,
+    )
 
 
 @app.route('/workouts/new', methods=['GET', 'POST'])
@@ -100,6 +209,12 @@ def new_workout():
     submitted = None
     errors = {}
     row_errors = []
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute('SELECT exercise_id, name, muscle_group FROM exercise ORDER BY name')
+    exercise_catalog = [{'exercise_id': r[0], 'name': r[1], 'muscle_group': r[2]} for r in cur.fetchall()]
+    cur.close()
 
     if request.method == 'POST':
         name = (request.form.get('name') or '').strip()
@@ -267,7 +382,7 @@ def new_workout():
             flash('Workout saved.', 'success')
             return redirect(url_for('dashboard'))
 
-    return render_template('new_workout.html', submitted=submitted, errors=errors, row_errors=row_errors)
+    return render_template('new_workout.html', submitted=submitted, errors=errors, row_errors=row_errors, exercise_catalog=exercise_catalog)
 
 
 @app.route('/workouts')
@@ -322,6 +437,9 @@ def edit_workout(workout_id):
 
     conn = get_db()
     cur = conn.cursor()
+
+    cur.execute('SELECT exercise_id, name, muscle_group FROM exercise ORDER BY name')
+    exercise_catalog = [{'exercise_id': r[0], 'name': r[1], 'muscle_group': r[2]} for r in cur.fetchall()]
 
     cur.execute(
         """
@@ -534,6 +652,7 @@ def edit_workout(workout_id):
         submitted=submitted,
         errors=errors,
         row_errors=row_errors,
+        exercise_catalog=exercise_catalog,
     )
 
 
