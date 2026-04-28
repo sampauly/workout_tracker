@@ -31,18 +31,4 @@ CREATE TABLE workout_exercise (
     PRIMARY KEY (workout_id, exercise_id)
 );
 
-CREATE TABLE workout_session (
-    session_id   SERIAL PRIMARY KEY,
-    user_id      INTEGER NOT NULL REFERENCES "user"(user_id),
-    workout_id   INTEGER NOT NULL REFERENCES workout(workout_id),
-    session_date TIMESTAMP NOT NULL
-);
 
-CREATE TABLE session_exercise (
-    session_exercise_id SERIAL PRIMARY KEY,
-    session_id          INTEGER NOT NULL REFERENCES workout_session(session_id),
-    exercise_id         INTEGER NOT NULL REFERENCES exercise(exercise_id),
-    sets_completed      INTEGER,
-    reps_completed      INTEGER,
-    weight_used         FLOAT
-);
